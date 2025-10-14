@@ -1,0 +1,247 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+IFS=$'\n\t'
+
+# ----------------------
+# Global Variables
+# ----------------------
+APP_NAME="network-utility"
+WHIPTAIL=false
+ARGS=()
+
+# Source utils - try installed location first, then local fallback
+if [ -f "/usr/local/lib/$APP_NAME/utils.sh" ]; then
+    source "/usr/local/lib/$APP_NAME/utils.sh"
+else
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    source "$SCRIPT_DIR/../lib/utils.sh"
+fi
+
+# ----------------------
+# Installer Functions
+# ----------------------
+install_static_ip() {
+    local installer="/usr/local/lib/$APP_NAME/install/static-ip.sh"
+    [ ! -f "$installer" ] && installer="$(dirname "${BASH_SOURCE[0]}")/../lib/install/static-ip.sh"
+    
+    if [ "$WHIPTAIL" = true ]; then
+        # Get parameters via whiptail dialogs
+        INTERFACE=$(whiptail --inputbox "Enter network interface:" 10 60 "eth0" 3>&1 1>&2 2>&3) || return
+        ADDRESS=$(whiptail --inputbox "Enter IP address with CIDR (e.g., 192.168.4.139/24):" 10 60 "192.168.4.139/24" 3>&1 1>&2 2>&3) || return
+        GATEWAY=$(whiptail --inputbox "Enter gateway IP:" 10 60 "192.168.4.1" 3>&1 1>&2 2>&3) || return
+        NAMESERVERS=$(whiptail --inputbox "Enter DNS servers (comma-separated):" 10 60 "8.8.8.8" 3>&1 1>&2 2>&3) || return
+        
+        if whiptail --yesno "Apply configuration immediately?" 10 60; then
+            bash "$installer" --interface "$INTERFACE" --address "$ADDRESS" --gateway "$GATEWAY" --nameservers "$NAMESERVERS" --apply -y
+        else
+            bash "$installer" --interface "$INTERFACE" --address "$ADDRESS" --gateway "$GATEWAY" --nameservers "$NAMESERVERS" -y
+        fi
+        whiptail --msgbox "Static IP configuration completed!" 10 50
+    else
+        # CLI mode - pass all arguments to the installer
+        bash "$installer" "${ARGS[@]}"
+    fi
+}
+
+install_pxe() {
+    local installer="/usr/local/lib/$APP_NAME/install/pxe.sh"
+    [ ! -f "$installer" ] && installer="$(dirname "${BASH_SOURCE[0]}")/../lib/install/pxe.sh"
+    
+    if [ "$WHIPTAIL" = true ]; then
+        # Get basic parameters via whiptail dialogs
+        INTERFACE=$(whiptail --inputbox "Enter network interface:" 10 60 "eth0" 3>&1 1>&2 2>&3) || return
+        STATIC_IP=$(whiptail --inputbox "Enter PXE server IP:" 10 60 "192.168.4.139" 3>&1 1>&2 2>&3) || return
+        
+        bash "$installer" --interface "$INTERFACE" --static-ip "$STATIC_IP"
+        whiptail --msgbox "PXE setup completed!" 10 50
+    else
+        # CLI mode - pass all arguments to the installer
+        bash "$installer" "${ARGS[@]}"
+    fi
+}
+
+install_tailscale() {
+    local installer="/usr/local/lib/$APP_NAME/install/tailscale.sh"
+    [ ! -f "$installer" ] && installer="$(dirname "${BASH_SOURCE[0]}")/../lib/install/tailscale.sh"
+    
+    if [ "$WHIPTAIL" = true ]; then
+        # Get parameters via whiptail dialogs
+        AUTHKEY=$(whiptail --inputbox "Enter Tailscale auth key (optional):" 10 60 "" 3>&1 1>&2 2>&3) || AUTHKEY=""
+        HOSTNAME=$(whiptail --inputbox "Enter hostname for this device (optional):" 10 60 "" 3>&1 1>&2 2>&3) || HOSTNAME=""
+        
+        local cmd="bash $installer"
+        [ -n "$AUTHKEY" ] && cmd="$cmd --authkey $AUTHKEY"
+        [ -n "$HOSTNAME" ] && cmd="$cmd --hostname $HOSTNAME"
+        
+        if whiptail --yesno "Run 'tailscale up' after installation?" 10 60; then
+            cmd="$cmd --up"
+        fi
+        
+        eval "$cmd"
+        whiptail --msgbox "Tailscale setup completed!" 10 50
+    else
+        # CLI mode - pass all arguments to the installer
+        bash "$installer" "${ARGS[@]}"
+    fi
+}
+
+install_nordvpn() {
+    local installer="/usr/local/lib/$APP_NAME/install/nordvpn.sh"
+    [ ! -f "$installer" ] && installer="$(dirname "${BASH_SOURCE[0]}")/../lib/install/nordvpn.sh"
+    
+    if [ "$WHIPTAIL" = true ]; then
+        # Get NordVPN token via whiptail
+        TOKEN=$(whiptail --passwordbox "Enter your NordVPN token:" 10 60 3>&1 1>&2 2>&3) || return
+        
+        bash "$installer" "$TOKEN"
+        whiptail --msgbox "NordVPN setup completed!" 10 50
+    else
+        # CLI mode - pass all arguments to the installer
+        bash "$installer" "${ARGS[@]}"
+    fi
+}
+
+# ----------------------
+# Main Menu Function
+# ----------------------
+main_menu() {
+    WHIPTAIL=true
+    
+    while true; do
+        CHOICE=$(whiptail --title "Network Utility" --menu "Choose an option:" 20 60 10 \
+            "Install Static IP" "Configure static IP address" \
+            "Install PXE" "Set up PXE boot server" \
+            "Install Tailscale" "Install and configure Tailscale" \
+            "Install NordVPN" "Install and configure NordVPN" \
+            "Delete" "Remove network-utility" \
+            "Exit" "Exit program" \
+            3>&1 1>&2 2>&3)
+
+        exitstatus=$?
+        if [ $exitstatus -ne 0 ] || [ -z "$CHOICE" ]; then
+            echo "No selection made. Exiting."
+            break
+        fi
+
+        case "$CHOICE" in
+            "Install Static IP") install_static_ip ;;
+            "Install PXE") install_pxe ;;
+            "Install Tailscale") install_tailscale ;;
+            "Install NordVPN") install_nordvpn ;;
+            "Delete") delete_app ;;
+            "Exit") exit_program ;;
+            *) whiptail --title "Error" --msgbox "Invalid option selected!" 10 50 ;;
+        esac
+    done
+}
+
+# ----------------------
+# CLI Command Handler
+# ----------------------
+run_command() {
+    local cmd="$1"
+    shift
+    ARGS=("$@")
+    
+    case "$cmd" in
+        "help")
+            show_help
+            ;;
+        "install")
+            if [ ${#ARGS[@]} -eq 0 ]; then
+                echo "Error: 'install' requires a subcommand"
+                show_help
+                exit 1
+            fi
+            local subcommand="${ARGS[0]}"
+            ARGS=("${ARGS[@]:1}")
+            
+            case "$subcommand" in
+                "static-ip") install_static_ip ;;
+                "pxe") install_pxe ;;
+                "tailscale") install_tailscale ;;
+                "nordvpn") install_nordvpn ;;
+                *) 
+                    echo "Unknown install subcommand: $subcommand"
+                    show_help
+                    exit 1
+                    ;;
+            esac
+            ;;
+        "delete")
+            delete_app
+            ;;
+        "quit"|"exit")
+            exit 0
+            ;;
+        *)
+            echo "Unknown command: $cmd"
+            show_help
+            exit 1
+            ;;
+    esac
+}
+
+# ----------------------
+# Help Function
+# ----------------------
+show_help() {
+    cat <<EOF
+Usage: $APP_NAME [COMMAND] [OPTIONS]
+
+Network Utility - Manage network configurations and services
+
+COMMANDS:
+    (no command)              Launch interactive menu
+    help                      Show this help message
+    install static-ip [...]   Configure static IP address
+    install pxe [...]         Set up PXE boot server
+    install tailscale [...]   Install and configure Tailscale
+    install nordvpn [...]     Install and configure NordVPN
+    delete                    Remove network-utility
+    exit, quit                Exit program
+
+EXAMPLES:
+    $APP_NAME
+        Launch interactive menu
+    
+    $APP_NAME install static-ip --interface eth0 --address 192.168.4.139/24 --gateway 192.168.4.1 --apply
+        Configure static IP via CLI
+    
+    $APP_NAME install pxe --interface eth0 --static-ip 192.168.4.139
+        Set up PXE server via CLI
+    
+    $APP_NAME install tailscale --authkey tskey-... --up
+        Install Tailscale with auth key
+    
+    $APP_NAME install nordvpn TOKEN
+        Install NordVPN with token
+
+For detailed options for each installer, run:
+    $APP_NAME install static-ip --help
+    $APP_NAME install pxe --help
+    $APP_NAME install tailscale --help
+
+EOF
+}
+
+# ----------------------
+# Entry Point
+# ----------------------
+main() {
+    if [ $# -ge 1 ]; then
+        run_command "$@"
+    else
+        # Check if Whiptail is installed
+        if ! command -v whiptail &> /dev/null; then
+            echo "Installing whiptail for interactive menu..."
+            sudo apt update
+            sudo apt install whiptail -y
+        fi
+
+        main_menu
+    fi
+}
+
+main "$@"

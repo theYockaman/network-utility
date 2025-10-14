@@ -1,7 +1,7 @@
 #!/bin/bash
 
 START_DIR="$(pwd)"
-APP_NAME="bash-app-template"
+APP_NAME="network-utility"
 INSTALL_DIR="/opt/github/$APP_NAME"
 BIN_DIR="/usr/local/bin"   # or use ~/bin for user-only
 LIB_DIR="/usr/local/lib/$APP_NAME"
