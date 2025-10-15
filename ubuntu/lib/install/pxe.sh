@@ -88,8 +88,21 @@ require_cmd(){
 try_download_iso(){
   local url="$1"
   echo "Checking ISO URL: $url"
-  if curl -f -I -s "$url" >/dev/null 2>&1; then
+  if curl -f -I -s --connect-timeout 10 --max-time 30 "$url" >/dev/null 2>&1; then
     echo "$url"
+    return 0
+  fi
+  return 1
+}
+
+# Helper function to parse HTML page for ISO filename
+find_iso_on_page(){
+  local page_url="$1"
+  echo "Searching for ISO on: $page_url"
+  local iso_filename
+  iso_filename=$(curl -s --connect-timeout 10 --max-time 30 "$page_url" 2>/dev/null | grep -o 'href="[^"]*live-server-amd64\.iso"' | head -1 | sed 's/href="//;s/"//')
+  if [ -n "$iso_filename" ]; then
+    echo "$iso_filename"
     return 0
   fi
   return 1
@@ -181,9 +194,7 @@ else
         echo "Initial URL failed, trying to find ISO on releases page..."
         # Try to find the ISO on the releases.ubuntu.com page
         RELEASES_PAGE="https://releases.ubuntu.com/${UBUNTU_LTS_VERSION}/"
-        ISO_FILENAME=$(curl -s "$RELEASES_PAGE" | grep -o 'href="[^"]*live-server-amd64\.iso"' | head -1 | sed 's/href="//;s/"//')
-        
-        if [ -n "$ISO_FILENAME" ]; then
+        if ISO_FILENAME=$(find_iso_on_page "$RELEASES_PAGE"); then
           DOWNLOAD_URL="${RELEASES_PAGE}${ISO_FILENAME}"
           echo "Found ISO: $DOWNLOAD_URL"
           ISO_TO_USE="/var/tmp/$ISO_FILENAME"
@@ -191,9 +202,7 @@ else
           echo "ISO not found on releases page, trying cdimage.ubuntu.com..."
           # Try cdimage.ubuntu.com as final fallback
           CDIMAGE_PAGE="https://cdimage.ubuntu.com/releases/${UBUNTU_LTS_VERSION}/release/"
-          ISO_FILENAME=$(curl -s "$CDIMAGE_PAGE" | grep -o 'href="[^"]*live-server-amd64\.iso"' | head -1 | sed 's/href="//;s/"//')
-          
-          if [ -n "$ISO_FILENAME" ]; then
+          if ISO_FILENAME=$(find_iso_on_page "$CDIMAGE_PAGE"); then
             DOWNLOAD_URL="${CDIMAGE_PAGE}${ISO_FILENAME}"
             echo "Found ISO: $DOWNLOAD_URL"
             ISO_TO_USE="/var/tmp/$ISO_FILENAME"
