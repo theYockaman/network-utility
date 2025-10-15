@@ -98,8 +98,8 @@ _wait_for_ip(){
   
   echo "Waiting for IP $ip to be configured on $interface..."
   while [ $elapsed -lt $max_wait ]; do
-    # Use precise matching with "/" or space or end of line after IP to avoid partial matches
-    if ip addr show "$interface" 2>/dev/null | grep -qE "inet ${ip}(/| |$)"; then
+    # Use precise matching with "/" followed by digit or space or end of line to avoid partial matches
+    if ip addr show "$interface" 2>/dev/null | grep -qE "inet ${ip}(/[0-9]| |$)"; then
       echo "IP $ip is now active on $interface"
       return 0
     fi
@@ -155,7 +155,7 @@ run_cmd sudo mkdir -p /etc/dnsmasq.d
 # Detect if systemd-resolved is active
 SYSTEMD_RESOLVED_ACTIVE=0
 if [ "$DRY_RUN" -eq 1 ]; then
-  # Check without sudo in dry-run mode (try with sudo first as fallback)
+  # Check without sudo first, then try with sudo as fallback in dry-run mode
   if systemctl is-active --quiet systemd-resolved 2>/dev/null || sudo systemctl is-active --quiet systemd-resolved 2>/dev/null; then
     SYSTEMD_RESOLVED_ACTIVE=1
     echo "systemd-resolved is active - would configure dnsmasq for DHCP/TFTP-only mode (port=0)"
