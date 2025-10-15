@@ -178,7 +178,7 @@ else
     elif [ -n "$IMAGE_URL" ]; then
       ISO_TO_USE="/var/tmp/$(basename "$IMAGE_URL")"
       run_cmd sudo mkdir -p /var/tmp
-      run_cmd sudo curl -L --fail -o "$ISO_TO_USE" "$IMAGE_URL"
+      run_cmd sudo curl -L --fail --connect-timeout 30 --max-time 3600 -o "$ISO_TO_USE" "$IMAGE_URL"
     else
       # Build Ubuntu releases URL with robust fallback
       ISO_NAME="ubuntu-${UBUNTU_LTS_VERSION}-live-server-amd64.iso"
@@ -219,7 +219,7 @@ else
       
       echo "Downloading ISO from: $DOWNLOAD_URL"
       run_cmd sudo mkdir -p /var/tmp
-      run_cmd sudo curl -L --fail -o "$ISO_TO_USE" "$DOWNLOAD_URL"
+      run_cmd sudo curl -L --fail --connect-timeout 30 --max-time 3600 -o "$ISO_TO_USE" "$DOWNLOAD_URL"
     fi
     if [ ! -f "$ISO_TO_USE" ]; then
       echo "ISO not found: $ISO_TO_USE" >&2
@@ -234,7 +234,7 @@ else
     elif [ -n "$IMAGE_URL" ]; then
       ISO_TO_USE="/var/tmp/$(basename "$IMAGE_URL")"
       run_cmd sudo mkdir -p /var/tmp
-      run_cmd sudo curl -L --fail -o "$ISO_TO_USE" "$IMAGE_URL"
+      run_cmd sudo curl -L --fail --connect-timeout 30 --max-time 3600 -o "$ISO_TO_USE" "$IMAGE_URL"
     else
       echo "When using --image custom you must provide --custom-iso or --image-url" >&2
       exit 1
