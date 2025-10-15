@@ -1,0 +1,23 @@
+# Temporary files
+*.tmp
+*.log
+*~
+.DS_Store
+
+# Build artifacts
+*.deb
+*.rpm
+
+# Test artifacts
+/tmp/
+test_results/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Downloaded ISOs and temporary download files
+*.iso
+/var/tmp/

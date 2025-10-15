@@ -101,6 +101,20 @@ Options:
 - `--force`: Overwrite existing image
 - `--dry-run`: Preview actions without executing
 
+**Important Notes:**
+
+The PXE installer automatically handles compatibility with `systemd-resolved`:
+- When `systemd-resolved` is active, dnsmasq is configured in DHCP/TFTP-only mode (`port=0`) to avoid DNS port conflicts
+- The installer uses `bind-dynamic` instead of `bind-interfaces` to avoid address binding races during network interface initialization
+- The installer waits for the static IP to be configured before starting dnsmasq, preventing startup failures
+
+If you need dnsmasq to provide DNS services instead of just DHCP/TFTP, you should disable `systemd-resolved` before running the installer:
+```bash
+sudo systemctl disable --now systemd-resolved
+sudo rm -f /etc/resolv.conf
+sudo ln -s /run/systemd/resolve/resolv.conf /etc/resolv.conf
+```
+
 #### Tailscale VPN
 
 Install and configure Tailscale:
