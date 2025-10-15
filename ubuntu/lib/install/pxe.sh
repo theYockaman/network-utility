@@ -84,6 +84,27 @@ require_cmd(){
   command -v "$1" >/dev/null 2>&1 || { echo "Required command '$1' not found" >&2; exit 1; }
 }
 
+# Wait for IP address to appear on interface
+_wait_for_ip(){
+  local ip="$1"
+  local interface="$2"
+  local max_wait=30
+  local elapsed=0
+  
+  echo "Waiting for IP $ip to be configured on $interface..."
+  while [ $elapsed -lt $max_wait ]; do
+    if ip addr show "$interface" 2>/dev/null | grep -q "inet $ip"; then
+      echo "IP $ip is now active on $interface"
+      return 0
+    fi
+    sleep 1
+    elapsed=$((elapsed + 1))
+  done
+  
+  echo "Warning: IP $ip not detected on $interface after ${max_wait}s. Continuing anyway..."
+  return 1
+}
+
 # Helper function to check if an ISO URL exists
 try_download_iso(){
   local url="$1"
@@ -124,11 +145,22 @@ fi
 
 # Create drop-in configuration to avoid conflicts with systemd-resolved
 run_cmd sudo mkdir -p /etc/dnsmasq.d
-run_cmd sudo tee /etc/dnsmasq.d/pxe.conf > /dev/null <<EOF
+
+# Detect if systemd-resolved is active
+SYSTEMD_RESOLVED_ACTIVE=0
+if sudo systemctl is-active --quiet systemd-resolved 2>/dev/null; then
+  SYSTEMD_RESOLVED_ACTIVE=1
+  echo "systemd-resolved is active - configuring dnsmasq for DHCP/TFTP-only mode (port=0)"
+fi
+
+# Build dnsmasq configuration
+if [ $SYSTEMD_RESOLVED_ACTIVE -eq 1 ]; then
+  run_cmd sudo tee /etc/dnsmasq.d/pxe.conf > /dev/null <<EOF
 # PXE-specific configuration - scoped to interface to avoid conflicts with systemd-resolved
+# Using port=0 to disable DNS service (DHCP/TFTP-only mode) because systemd-resolved is active
 interface=$NETWORK_INTERFACE
-bind-interfaces
-listen-address=$STATIC_IP
+bind-dynamic
+port=0
 dhcp-range=$DHCP_RANGE_START,$DHCP_RANGE_END,12h
 dhcp-boot=pxelinux.0
 enable-tftp
@@ -136,6 +168,19 @@ tftp-root=$TFTP_ROOT
 dhcp-option=3,$GATEWAY_IP
 dhcp-option=6,$DNS_SERVER
 EOF
+else
+  run_cmd sudo tee /etc/dnsmasq.d/pxe.conf > /dev/null <<EOF
+# PXE-specific configuration - scoped to interface
+interface=$NETWORK_INTERFACE
+bind-dynamic
+dhcp-range=$DHCP_RANGE_START,$DHCP_RANGE_END,12h
+dhcp-boot=pxelinux.0
+enable-tftp
+tftp-root=$TFTP_ROOT
+dhcp-option=3,$GATEWAY_IP
+dhcp-option=6,$DNS_SERVER
+EOF
+fi
 
 echo "Prepare TFTP and NFS directories"
 run_cmd sudo mkdir -p "$TFTP_ROOT/pxelinux.cfg"
@@ -268,6 +313,10 @@ EOF
 run_cmd sudo exportfs -ra
 
 echo "Enable and start services"
+# Wait for the static IP to be available before starting dnsmasq
+if [ "$DRY_RUN" -eq 0 ]; then
+  _wait_for_ip "$STATIC_IP" "$NETWORK_INTERFACE"
+fi
 run_cmd sudo systemctl enable --now dnsmasq
 run_cmd sudo systemctl enable --now tftpd-hpa
 run_cmd sudo systemctl enable --now nfs-kernel-server

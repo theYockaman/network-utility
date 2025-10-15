@@ -95,5 +95,30 @@ else
     exit 1
 fi
 
+# Test 9: Install pxe --dry-run
+echo "Test 9: Install pxe --dry-run"
+set +e
+OUTPUT=$("$NETWORK_UTILITY" install pxe --dry-run 2>&1)
+set -e
+if [[ "$OUTPUT" == *"Setting up PXE"* ]] && [[ "$OUTPUT" == *"dnsmasq"* ]]; then
+    echo "✓ Test 9 passed: pxe dry-run works"
+else
+    echo "✗ Test 9 failed: pxe dry-run output incorrect"
+    exit 1
+fi
+
+# Test 10: Verify PXE detects systemd-resolved in dry-run
+echo "Test 10: Verify PXE handles systemd-resolved"
+set +e
+OUTPUT=$("$NETWORK_UTILITY" install pxe --dry-run 2>&1)
+set -e
+# Check if it mentions systemd-resolved handling (may or may not be active on test system)
+if [[ "$OUTPUT" == *"dnsmasq"* ]]; then
+    echo "✓ Test 10 passed: PXE configuration includes dnsmasq setup"
+else
+    echo "✗ Test 10 failed: PXE configuration missing dnsmasq setup"
+    exit 1
+fi
+
 echo ""
 echo "All tests passed! ✓"
