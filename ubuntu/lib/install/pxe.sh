@@ -91,9 +91,15 @@ _wait_for_ip(){
   local max_wait=30
   local elapsed=0
   
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "Would wait for IP $ip to be configured on $interface (up to ${max_wait}s)"
+    return 0
+  fi
+  
   echo "Waiting for IP $ip to be configured on $interface..."
   while [ $elapsed -lt $max_wait ]; do
-    if ip addr show "$interface" 2>/dev/null | grep -q "inet $ip"; then
+    # Use precise matching with "/" or space after IP to avoid partial matches
+    if ip addr show "$interface" 2>/dev/null | grep -qE "inet ${ip}[/ ]"; then
       echo "IP $ip is now active on $interface"
       return 0
     fi
@@ -148,9 +154,17 @@ run_cmd sudo mkdir -p /etc/dnsmasq.d
 
 # Detect if systemd-resolved is active
 SYSTEMD_RESOLVED_ACTIVE=0
-if sudo systemctl is-active --quiet systemd-resolved 2>/dev/null; then
-  SYSTEMD_RESOLVED_ACTIVE=1
-  echo "systemd-resolved is active - configuring dnsmasq for DHCP/TFTP-only mode (port=0)"
+if [ "$DRY_RUN" -eq 1 ]; then
+  # Check without sudo in dry-run mode
+  if systemctl is-active --quiet systemd-resolved 2>/dev/null; then
+    SYSTEMD_RESOLVED_ACTIVE=1
+    echo "systemd-resolved is active - would configure dnsmasq for DHCP/TFTP-only mode (port=0)"
+  fi
+else
+  if sudo systemctl is-active --quiet systemd-resolved 2>/dev/null; then
+    SYSTEMD_RESOLVED_ACTIVE=1
+    echo "systemd-resolved is active - configuring dnsmasq for DHCP/TFTP-only mode (port=0)"
+  fi
 fi
 
 # Build dnsmasq configuration
@@ -314,9 +328,7 @@ run_cmd sudo exportfs -ra
 
 echo "Enable and start services"
 # Wait for the static IP to be available before starting dnsmasq
-if [ "$DRY_RUN" -eq 0 ]; then
-  _wait_for_ip "$STATIC_IP" "$NETWORK_INTERFACE"
-fi
+_wait_for_ip "$STATIC_IP" "$NETWORK_INTERFACE"
 run_cmd sudo systemctl enable --now dnsmasq
 run_cmd sudo systemctl enable --now tftpd-hpa
 run_cmd sudo systemctl enable --now nfs-kernel-server
