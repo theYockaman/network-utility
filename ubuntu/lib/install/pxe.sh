@@ -84,6 +84,17 @@ require_cmd(){
   command -v "$1" >/dev/null 2>&1 || { echo "Required command '$1' not found" >&2; exit 1; }
 }
 
+# Helper function to check if an ISO URL exists
+try_download_iso(){
+  local url="$1"
+  echo "Checking ISO URL: $url"
+  if curl -f -I -s "$url" >/dev/null 2>&1; then
+    echo "$url"
+    return 0
+  fi
+  return 1
+}
+
 require_cmd rsync
 require_cmd tee
 
@@ -98,8 +109,13 @@ if [ -f "$DNSMASQ_CONF" ]; then
   run_cmd sudo cp -f "$DNSMASQ_CONF" "${DNSMASQ_CONF}.backup"
 fi
 
-run_cmd sudo tee "$DNSMASQ_CONF" > /dev/null <<EOF
+# Create drop-in configuration to avoid conflicts with systemd-resolved
+run_cmd sudo mkdir -p /etc/dnsmasq.d
+run_cmd sudo tee /etc/dnsmasq.d/pxe.conf > /dev/null <<EOF
+# PXE-specific configuration - scoped to interface to avoid conflicts with systemd-resolved
 interface=$NETWORK_INTERFACE
+bind-interfaces
+listen-address=$STATIC_IP
 dhcp-range=$DHCP_RANGE_START,$DHCP_RANGE_END,12h
 dhcp-boot=pxelinux.0
 enable-tftp
@@ -151,11 +167,48 @@ else
       run_cmd sudo mkdir -p /var/tmp
       run_cmd sudo curl -L --fail -o "$ISO_TO_USE" "$IMAGE_URL"
     else
-      # Build Ubuntu releases URL
+      # Build Ubuntu releases URL with robust fallback
       ISO_NAME="ubuntu-${UBUNTU_LTS_VERSION}-live-server-amd64.iso"
       ISO_TO_USE="/var/tmp/$ISO_NAME"
       DOWNLOAD_URL="https://releases.ubuntu.com/${UBUNTU_LTS_VERSION}/${ISO_NAME}"
-      echo "No base ISO provided - will download Ubuntu LTS from $DOWNLOAD_URL"
+      
+      echo "No base ISO provided - attempting to download Ubuntu LTS"
+      
+      # Try the initially constructed URL first
+      if try_download_iso "$DOWNLOAD_URL"; then
+        echo "Found ISO at $DOWNLOAD_URL"
+      else
+        echo "Initial URL failed, trying to find ISO on releases page..."
+        # Try to find the ISO on the releases.ubuntu.com page
+        RELEASES_PAGE="https://releases.ubuntu.com/${UBUNTU_LTS_VERSION}/"
+        ISO_FILENAME=$(curl -s "$RELEASES_PAGE" | grep -o 'href="[^"]*live-server-amd64\.iso"' | head -1 | sed 's/href="//;s/"//')
+        
+        if [ -n "$ISO_FILENAME" ]; then
+          DOWNLOAD_URL="${RELEASES_PAGE}${ISO_FILENAME}"
+          echo "Found ISO: $DOWNLOAD_URL"
+          ISO_TO_USE="/var/tmp/$ISO_FILENAME"
+        else
+          echo "ISO not found on releases page, trying cdimage.ubuntu.com..."
+          # Try cdimage.ubuntu.com as final fallback
+          CDIMAGE_PAGE="https://cdimage.ubuntu.com/releases/${UBUNTU_LTS_VERSION}/release/"
+          ISO_FILENAME=$(curl -s "$CDIMAGE_PAGE" | grep -o 'href="[^"]*live-server-amd64\.iso"' | head -1 | sed 's/href="//;s/"//')
+          
+          if [ -n "$ISO_FILENAME" ]; then
+            DOWNLOAD_URL="${CDIMAGE_PAGE}${ISO_FILENAME}"
+            echo "Found ISO: $DOWNLOAD_URL"
+            ISO_TO_USE="/var/tmp/$ISO_FILENAME"
+          else
+            echo "ERROR: Could not find Ubuntu ${UBUNTU_LTS_VERSION} live-server ISO" >&2
+            echo "Please check the following URLs manually to find the ISO filename:" >&2
+            echo "  - $RELEASES_PAGE" >&2
+            echo "  - $CDIMAGE_PAGE" >&2
+            echo "Then run: sudo $0 --image-url <ISO_URL>" >&2
+            exit 1
+          fi
+        fi
+      fi
+      
+      echo "Downloading ISO from: $DOWNLOAD_URL"
       run_cmd sudo mkdir -p /var/tmp
       run_cmd sudo curl -L --fail -o "$ISO_TO_USE" "$DOWNLOAD_URL"
     fi
@@ -199,6 +252,7 @@ LABEL ubuntu
 EOF
 
 echo "Exporting NFS"
+run_cmd sudo mkdir -p "$(dirname "$EXPORTS_FILE")"
 run_cmd sudo tee "$EXPORTS_FILE" > /dev/null <<EOF
 $TARGET_DIR *(ro,sync,no_subtree_check)
 EOF
